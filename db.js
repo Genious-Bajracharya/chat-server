@@ -176,5 +176,63 @@ if (!process.env.DATABASE_URL) {
   });
 }
 
+// Helper functions for cross-database compatibility
+function runQuery(query, params = []) {
+  return new Promise((resolve, reject) => {
+    if (db.isPg) {
+      db.query(query, params, (err, result) => {
+        if (err) reject(err);
+        else resolve(result);
+      });
+    } else {
+      try {
+        const result = db.prepare(query).run(...params);
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      }
+    }
+  });
+}
+
+function getQuery(query, params = []) {
+  return new Promise((resolve, reject) => {
+    if (db.isPg) {
+      db.query(query, params, (err, result) => {
+        if (err) reject(err);
+        else resolve(result.rows[0]);
+      });
+    } else {
+      try {
+        const result = db.prepare(query).get(...params);
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      }
+    }
+  });
+}
+
+function allQuery(query, params = []) {
+  return new Promise((resolve, reject) => {
+    if (db.isPg) {
+      db.query(query, params, (err, result) => {
+        if (err) reject(err);
+        else resolve(result.rows);
+      });
+    } else {
+      try {
+        const result = db.prepare(query).all(...params);
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      }
+    }
+  });
+}
+
 module.exports = db;
 module.exports.messagesDb = messagesDb;
+module.exports.runQuery = runQuery;
+module.exports.getQuery = getQuery;
+module.exports.allQuery = allQuery;

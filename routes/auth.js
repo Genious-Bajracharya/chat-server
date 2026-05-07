@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../db');
 const { verifyToken, requireAdmin, JWT_SECRET } = require('../middleware/auth');
 const { getCountryFromIP, parseDeviceInfo } = require('../utils/geoip');
+const { getQuery, runQuery } = require('../db');
 
 const router = express.Router();
 
@@ -34,7 +35,7 @@ router.post('/register', async (req, res) => {
   }
 
   try {
-    const existingUser = db.prepare('SELECT id FROM users WHERE email = ? OR username = ?').get(email, username);
+    const existingUser = await getQuery('SELECT id FROM users WHERE email = ? OR username = ?', [email, username]);
     if (existingUser) {
       return res.status(409).json({ error: 'Username or email already taken.' });
     }
@@ -44,12 +45,16 @@ router.post('/register', async (req, res) => {
     const deviceInfo = parseDeviceInfo(req.headers['user-agent']);
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const result = db.prepare(
+    await runQuery(
       `INSERT INTO users (username, email, password_hash, role, registration_ip, registration_country, device_info, last_login_at, last_login_ip)
-       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`
-    ).run(username, email, passwordHash, 'user', clientIP, country, deviceInfo, clientIP);
+       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
+      [username, email, passwordHash, 'user', clientIP, country, deviceInfo, clientIP]
+    );
 
-    const user = db.prepare('SELECT id, username, email, role, created_at, registration_country, device_info FROM users WHERE id = ?').get(result.lastInsertRowid);
+    const user = await getQuery(
+      'SELECT id, username, email, role, created_at, registration_country, device_info FROM users WHERE email = ?',
+      [email]
+    );
 
     const token = jwt.sign(
       { id: user.id, username: user.username, email: user.email, role: user.role },
@@ -73,7 +78,7 @@ router.post('/login', async (req, res) => {
   }
 
   try {
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    const user = await getQuery('SELECT * FROM users WHERE email = ?', [email]);
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
@@ -88,8 +93,8 @@ router.post('/login', async (req, res) => {
     }
 
     const clientIP = getClientIP(req);
-    db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP, last_login_ip = ? WHERE id = ?')
-      .run(clientIP, user.id);
+    await runQuery('UPDATE users SET last_login_at = CURRENT_TIMESTAMP, last_login_ip = ? WHERE id = ?',
+      [clientIP, user.id]);
 
     const token = jwt.sign(
       { id: user.id, username: user.username, email: user.email, role: user.role },
@@ -106,28 +111,33 @@ router.post('/login', async (req, res) => {
 });
 
 // POST /api/auth/impersonate/:userId — admin only
-router.post('/impersonate/:userId', verifyToken, requireAdmin, (req, res) => {
+router.post('/impersonate/:userId', verifyToken, requireAdmin, async (req, res) => {
   const { userId } = req.params;
 
-  const targetUser = db.prepare('SELECT id, username, email, role FROM users WHERE id = ?').get(userId);
-  if (!targetUser) {
-    return res.status(404).json({ error: 'User not found.' });
+  try {
+    const targetUser = await getQuery('SELECT id, username, email, role FROM users WHERE id = ?', [userId]);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const token = jwt.sign(
+      {
+        id: targetUser.id,
+        username: targetUser.username,
+        email: targetUser.email,
+        role: targetUser.role,
+        impersonatedBy: req.user.id,
+        impersonating: true
+      },
+      JWT_SECRET,
+      { expiresIn: '2h' }
+    );
+
+    res.json({ token, user: { ...targetUser, impersonating: true } });
+  } catch (err) {
+    console.error('Impersonate error:', err);
+    res.status(500).json({ error: 'Failed to impersonate user.' });
   }
-
-  const token = jwt.sign(
-    {
-      id: targetUser.id,
-      username: targetUser.username,
-      email: targetUser.email,
-      role: targetUser.role,
-      impersonatedBy: req.user.id,
-      impersonating: true
-    },
-    JWT_SECRET,
-    { expiresIn: '2h' }
-  );
-
-  res.json({ token, user: { ...targetUser, impersonating: true } });
 });
 
 module.exports = router;
