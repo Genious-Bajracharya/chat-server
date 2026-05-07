@@ -188,8 +188,12 @@ function runQuery(query, params = []) {
     if (db.isPg) {
       const pgQuery = convertPlaceholders(query);
       db.query(pgQuery, params, (err, result) => {
-        if (err) reject(err);
-        else resolve(result);
+        if (err) {
+          console.error('PostgreSQL Error:', { query: pgQuery, params, error: err.message });
+          reject(err);
+        } else {
+          resolve(result);
+        }
       });
     } else {
       try {
@@ -207,8 +211,12 @@ function getQuery(query, params = []) {
     if (db.isPg) {
       const pgQuery = convertPlaceholders(query);
       db.query(pgQuery, params, (err, result) => {
-        if (err) reject(err);
-        else resolve(result.rows[0]);
+        if (err) {
+          console.error('PostgreSQL Error (getQuery):', { query: pgQuery, params, error: err.message });
+          reject(err);
+        } else {
+          resolve(result.rows[0]);
+        }
       });
     } else {
       try {
@@ -226,8 +234,12 @@ function allQuery(query, params = []) {
     if (db.isPg) {
       const pgQuery = convertPlaceholders(query);
       db.query(pgQuery, params, (err, result) => {
-        if (err) reject(err);
-        else resolve(result.rows);
+        if (err) {
+          console.error('PostgreSQL Error (allQuery):', { query: pgQuery, params, error: err.message });
+          reject(err);
+        } else {
+          resolve(result.rows);
+        }
       });
     } else {
       try {
