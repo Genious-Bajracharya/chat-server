@@ -1,24 +1,111 @@
 const Database = require('better-sqlite3');
+const { Client } = require('pg');
 const bcrypt = require('bcrypt');
 const path = require('path');
 
-// ⚠️ WARNING: DUAL DATABASE SETUP
-// Users & Friends: PostgreSQL (persistent on Render)
-// Messages: SQLite (WILL BE DELETED ON RENDER RESTART)
-// When deployed: Messages will be lost every time Render restarts!
-// Add Cloudinary + migrate to PostgreSQL for messages before production!
+let db;
 
 // ============================================
-// MESSAGES DATABASE (SQLite - Local only)
+// USERS & FRIENDS DATABASE
+// Production: PostgreSQL (Persistent on Render)
+// Local: SQLite (for easy development)
+// ============================================
+
+if (process.env.DATABASE_URL) {
+  // Production: PostgreSQL on Neon
+  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  client.connect().catch(err => console.error('PostgreSQL connection error:', err));
+
+  db = client;
+  db.isPg = true;
+
+  // Initialize tables
+  client.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      is_online INTEGER DEFAULT 0,
+      public_key TEXT,
+      status TEXT,
+      bio TEXT,
+      registration_ip TEXT,
+      registration_country TEXT,
+      device_info TEXT,
+      last_login_at TIMESTAMP,
+      last_login_ip TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS friends (
+      id SERIAL PRIMARY KEY,
+      requester_id INTEGER NOT NULL,
+      addressee_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(requester_id, addressee_id)
+    );
+  `).catch(err => console.error('Table creation error:', err));
+
+  console.log('✅ Using PostgreSQL for users/friends');
+} else {
+  // Local: SQLite (easier for development)
+  const DB_PATH = path.join(__dirname, 'chat.db');
+  db = new Database(DB_PATH);
+  db.isPg = false;
+
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      is_online INTEGER DEFAULT 0,
+      public_key TEXT,
+      status TEXT,
+      bio TEXT,
+      registration_ip TEXT,
+      registration_country TEXT,
+      device_info TEXT,
+      last_login_at DATETIME,
+      last_login_ip TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS friends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      requester_id INTEGER NOT NULL,
+      addressee_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(requester_id, addressee_id)
+    );
+  `);
+
+  console.log('✅ Using SQLite for users/friends (local development)');
+}
+
+// ============================================
+// MESSAGES DATABASE (SQLite - Always Local)
+// ⚠️ WILL BE DELETED ON RENDER RESTART
+// Messages stay in SQLite for now
 // ============================================
 const MSG_DB_PATH = path.join(__dirname, 'messages.db');
 const messagesDb = new Database(MSG_DB_PATH);
 
-// Enable WAL mode for better concurrent performance
 messagesDb.pragma('journal_mode = WAL');
 messagesDb.pragma('foreign_keys = ON');
 
-// Create messages table
 messagesDb.exec(`
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,10 +119,7 @@ messagesDb.exec(`
     edited_at DATETIME,
     deleted INTEGER DEFAULT 0
   );
-`);
 
-// Create message_reactions table
-messagesDb.exec(`
   CREATE TABLE IF NOT EXISTS message_reactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id INTEGER NOT NULL,
@@ -46,71 +130,51 @@ messagesDb.exec(`
   );
 `);
 
-// ============================================
-// USERS & FRIENDS DATABASE (SQLite - Local)
-// For now, will migrate to PostgreSQL later
-// ============================================
-const USERS_DB_PATH = path.join(__dirname, 'chat.db');
-const db = new Database(USERS_DB_PATH);
+// Seed admin & KingKai users
+if (!process.env.DATABASE_URL) {
+  // Local SQLite seeding
+  const adminExists = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@chat.app');
+  if (!adminExists) {
+    const passwordHash = bcrypt.hashSync('admin123', 10);
+    db.prepare(
+      'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
+    ).run('admin', 'admin@chat.app', passwordHash, 'admin');
+    console.log('✅ Admin user seeded: admin@chat.app / admin123');
+  }
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+  const kingkaiExists = db.prepare('SELECT id FROM users WHERE username = ?').get('KingKai');
+  if (!kingkaiExists) {
+    const passwordHash = bcrypt.hashSync('kingkai123', 10);
+    db.prepare(
+      'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
+    ).run('KingKai', 'kingkai@chat.app', passwordHash, 'user');
+    console.log('✅ KingKai user seeded');
+  }
+} else {
+  // PostgreSQL seeding
+  db.query('SELECT id FROM users WHERE email = $1', ['admin@chat.app'], (err, result) => {
+    if (!err && result.rows.length === 0) {
+      const passwordHash = bcrypt.hashSync('admin123', 10);
+      db.query(
+        'INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, $3, $4)',
+        ['admin', 'admin@chat.app', passwordHash, 'admin'],
+        (err) => {
+          if (!err) console.log('✅ Admin user seeded');
+        }
+      );
+    }
+  });
 
-// Create users table
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'user',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    is_online INTEGER DEFAULT 0,
-    public_key TEXT,
-    status TEXT,
-    bio TEXT,
-    registration_ip TEXT,
-    registration_country TEXT,
-    device_info TEXT,
-    last_login_at DATETIME,
-    last_login_ip TEXT
-  );
-`);
-
-// Create friends table
-db.exec(`
-  CREATE TABLE IF NOT EXISTS friends (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    requester_id INTEGER NOT NULL,
-    addressee_id INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE,
-    UNIQUE(requester_id, addressee_id)
-  );
-`);
-
-// Seed admin user if not present
-const adminExists = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@chat.app');
-if (!adminExists) {
-  const passwordHash = bcrypt.hashSync('admin123', 10);
-  db.prepare(
-    'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
-  ).run('admin', 'admin@chat.app', passwordHash, 'admin');
-  console.log('Admin user seeded: admin@chat.app / admin123');
-}
-
-// Seed KingKai user if not present
-const kingkaiExists = db.prepare('SELECT id FROM users WHERE username = ?').get('KingKai');
-if (!kingkaiExists) {
-  const passwordHash = bcrypt.hashSync('kingkai123', 10);
-  db.prepare(
-    'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
-  ).run('KingKai', 'kingkai@chat.app', passwordHash, 'user');
-  console.log('KingKai user seeded: kingkai@chat.app / kingkai123');
+  db.query('SELECT id FROM users WHERE username = $1', ['KingKai'], (err, result) => {
+    if (!err && result.rows.length === 0) {
+      const passwordHash = bcrypt.hashSync('kingkai123', 10);
+      db.query(
+        'INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, $3, $4)',
+        ['KingKai', 'kingkai@chat.app', passwordHash, 'user']
+      );
+    }
+  });
 }
 
 module.exports = db;
 module.exports.messagesDb = messagesDb;
-module.exports.usersDb = db;
