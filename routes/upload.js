@@ -49,9 +49,14 @@ router.post('/', verifyToken, upload.single('file'), (req, res) => {
       : req.file.mimetype.startsWith('audio/')
       ? 'audio'
       : 'video';
-    const fileUrl = `/uploads/${req.file.filename}`;
 
-    console.log(`File uploaded: ${req.file.filename} (${fileType})`);
+    // Get the full backend URL from environment or construct it
+    const protocol = req.protocol || 'https';
+    const host = req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+    const fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
+
+    console.log(`File uploaded: ${req.file.filename} (${fileType}) at ${fileUrl}`);
     res.json({ fileUrl, fileType, originalName: req.file.originalname });
   } catch (err) {
     console.error('Upload error:', err);
