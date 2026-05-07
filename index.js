@@ -4,7 +4,6 @@ const path = require('path');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const db = require('./db');
@@ -35,41 +34,13 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Rate limiters
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // max 5 login attempts per 15 min
-  message: 'Too many login attempts. Please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 3, // max 3 registrations per hour per IP
-  message: 'Too many accounts created. Please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-const messageLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 30, // max 30 messages per minute
-  message: 'Too many messages. Please slow down.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Routes
-app.use('/api/auth/login', loginLimiter);
-app.use('/api/auth/register', registerLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/friends', friendRoutes);
-app.use('/api/messages', messageLimiter);
 app.use('/api/messages', messageRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/upload', uploadRoutes);
