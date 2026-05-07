@@ -25,7 +25,8 @@ const io = new Server(server, {
     origin: [
       process.env.CLIENT_URL || 'http://localhost:5173',
       'http://localhost:5173',
-      'http://localhost:3000'
+      'http://localhost:3000',
+      'https://dnschat.vercel.app'
     ].filter(Boolean),
     methods: ['GET', 'POST'],
     credentials: true
