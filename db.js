@@ -176,11 +176,18 @@ if (!process.env.DATABASE_URL) {
   });
 }
 
+// Convert SQLite ? placeholders to PostgreSQL $1, $2, etc.
+function convertPlaceholders(query) {
+  let paramIndex = 1;
+  return query.replace(/\?/g, () => `$${paramIndex++}`);
+}
+
 // Helper functions for cross-database compatibility
 function runQuery(query, params = []) {
   return new Promise((resolve, reject) => {
     if (db.isPg) {
-      db.query(query, params, (err, result) => {
+      const pgQuery = convertPlaceholders(query);
+      db.query(pgQuery, params, (err, result) => {
         if (err) reject(err);
         else resolve(result);
       });
@@ -198,7 +205,8 @@ function runQuery(query, params = []) {
 function getQuery(query, params = []) {
   return new Promise((resolve, reject) => {
     if (db.isPg) {
-      db.query(query, params, (err, result) => {
+      const pgQuery = convertPlaceholders(query);
+      db.query(pgQuery, params, (err, result) => {
         if (err) reject(err);
         else resolve(result.rows[0]);
       });
@@ -216,7 +224,8 @@ function getQuery(query, params = []) {
 function allQuery(query, params = []) {
   return new Promise((resolve, reject) => {
     if (db.isPg) {
-      db.query(query, params, (err, result) => {
+      const pgQuery = convertPlaceholders(query);
+      db.query(pgQuery, params, (err, result) => {
         if (err) reject(err);
         else resolve(result.rows);
       });
