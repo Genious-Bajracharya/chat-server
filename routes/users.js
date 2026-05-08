@@ -164,4 +164,61 @@ router.get('/search', verifyToken, async (req, res) => {
   }
 });
 
+// POST /api/users/:id/block — block a user
+router.post('/:id/block', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
+  try {
+    if (parseInt(id) === userId) {
+      return res.status(400).json({ error: 'Cannot block yourself.' });
+    }
+
+    const user = await getQuery('SELECT id FROM users WHERE id = ?', [id]);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    // Check if already blocked
+    const existing = await getQuery('SELECT id FROM blocks WHERE blocker_id = ? AND blocked_user_id = ?', [userId, id]);
+    if (existing) {
+      return res.status(400).json({ error: 'User is already blocked.' });
+    }
+
+    await runQuery('INSERT INTO blocks (blocker_id, blocked_user_id) VALUES (?, ?)', [userId, id]);
+    res.status(201).json({ message: 'User blocked successfully.' });
+  } catch (err) {
+    console.error('Error blocking user:', err);
+    res.status(500).json({ error: 'Failed to block user.' });
+  }
+});
+
+// POST /api/users/:id/unblock — unblock a user
+router.post('/:id/unblock', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
+  try {
+    const result = await runQuery('DELETE FROM blocks WHERE blocker_id = ? AND blocked_user_id = ?', [userId, id]);
+    res.json({ message: 'User unblocked successfully.' });
+  } catch (err) {
+    console.error('Error unblocking user:', err);
+    res.status(500).json({ error: 'Failed to unblock user.' });
+  }
+});
+
+// GET /api/users/:id/is-blocked — check if a user is blocked
+router.get('/:id/is-blocked', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
+  try {
+    const blocked = await getQuery('SELECT id FROM blocks WHERE blocker_id = ? AND blocked_user_id = ?', [userId, id]);
+    res.json({ isBlocked: !!blocked });
+  } catch (err) {
+    console.error('Error checking block status:', err);
+    res.status(500).json({ error: 'Failed to check block status.' });
+  }
+});
+
 module.exports = router;
