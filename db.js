@@ -49,6 +49,34 @@ if (process.env.DATABASE_URL) {
       FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE(requester_id, addressee_id)
     );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY,
+      sender_id INTEGER NOT NULL,
+      receiver_id INTEGER NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      file_url TEXT,
+      file_type TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      read_at TIMESTAMP,
+      edited_at TIMESTAMP,
+      FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS message_reactions (
+      id SERIAL PRIMARY KEY,
+      message_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      emoji TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(message_id, user_id, emoji)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_sender_receiver ON messages(sender_id, receiver_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
   `).catch(err => console.error('Table creation error:', err));
 
   console.log('✅ Using PostgreSQL for users/friends');

@@ -151,29 +151,26 @@ io.on('connection', (socket) => {
         return socket.emit('error', { message: 'Receiver not found.' });
       }
 
-      // Save message to MESSAGES DB
-      const messagesDb = require('./db').messagesDb;
-      const result = messagesDb.prepare(
-        'INSERT INTO messages (sender_id, receiver_id, content, file_url, file_type) VALUES (?, ?, ?, ?, ?)'
-      ).run(userId, receiverId, content?.trim() || '', fileUrl || null, fileType || null);
+      // Save message to PostgreSQL
+      await runQuery(
+        'INSERT INTO messages (sender_id, receiver_id, content, file_url, file_type) VALUES (?, ?, ?, ?, ?)',
+        [userId, receiverId, content?.trim() || '', fileUrl || null, fileType || null]
+      );
 
-      const message = messagesDb.prepare(
-        `SELECT m.* FROM messages m WHERE m.id = ?`
-      ).get(result.lastInsertRowid);
-
-      // Add sender info from users DB
-      const sender = await getQuery('SELECT username, public_key FROM users WHERE id = ?', [userId]);
-      const messageWithSender = {
-        ...message,
-        sender_username: sender?.username,
-        sender_public_key: sender?.public_key
-      };
+      const message = await getQuery(
+        `SELECT m.*, u.username as sender_username, u.public_key as sender_public_key FROM messages m
+         JOIN users u ON m.sender_id = u.id
+         WHERE m.sender_id = ? AND m.receiver_id = ? AND m.created_at = (
+           SELECT MAX(created_at) FROM messages WHERE sender_id = ? AND receiver_id = ?
+         )`,
+        [userId, receiverId, userId, receiverId]
+      );
 
       // Emit to receiver
-      io.to(`user_${receiverId}`).emit('receive_message', messageWithSender);
+      io.to(`user_${receiverId}`).emit('receive_message', message);
 
       // Confirm to sender
-      socket.emit('message_sent', messageWithSender);
+      socket.emit('message_sent', message);
     } catch (err) {
       console.error('Error sending message:', err);
       socket.emit('error', { message: 'Failed to send message.' });
@@ -197,14 +194,13 @@ io.on('connection', (socket) => {
     if (!content?.trim()) return;
 
     try {
-      const messagesDb = require('./db').messagesDb;
-      const msg = messagesDb.prepare('SELECT * FROM messages WHERE id = ?').get(messageId);
+      const msg = await getQuery('SELECT * FROM messages WHERE id = ?', [messageId]);
       if (!msg || msg.sender_id !== userId || msg.file_url) return;
 
-      messagesDb.prepare('UPDATE messages SET content = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .run(content.trim(), messageId);
+      await runQuery('UPDATE messages SET content = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [content.trim(), messageId]);
 
-      const updated = messagesDb.prepare('SELECT * FROM messages WHERE id = ?').get(messageId);
+      const updated = await getQuery('SELECT * FROM messages WHERE id = ?', [messageId]);
       const sender = await getQuery('SELECT username, public_key FROM users WHERE id = ?', [userId]);
 
       const { getReactions } = require('./routes/messages');
@@ -219,39 +215,43 @@ io.on('connection', (socket) => {
   });
 
   // Delete message
-  socket.on('delete_message', ({ messageId }) => {
-    const messagesDb = require('./db').messagesDb;
-    const msg = messagesDb.prepare('SELECT * FROM messages WHERE id = ?').get(messageId);
-    if (!msg || msg.sender_id !== userId) return;
+  socket.on('delete_message', async ({ messageId }) => {
+    try {
+      const msg = await getQuery('SELECT * FROM messages WHERE id = ?', [messageId]);
+      if (!msg || msg.sender_id !== userId) return;
 
-    messagesDb.prepare('DELETE FROM messages WHERE id = ?').run(messageId);
+      await runQuery('DELETE FROM messages WHERE id = ?', [messageId]);
 
-    socket.emit('message_deleted', { messageId });
-    io.to(`user_${msg.receiver_id}`).emit('message_deleted', { messageId });
+      socket.emit('message_deleted', { messageId });
+      io.to(`user_${msg.receiver_id}`).emit('message_deleted', { messageId });
+    } catch (err) {
+      console.error('Error deleting message:', err);
+    }
   });
 
   // Reaction
-  socket.on('add_reaction', ({ messageId, emoji }) => {
+  socket.on('add_reaction', async ({ messageId, emoji }) => {
     if (!emoji) return;
 
     try {
-      const messagesDb = require('./db').messagesDb;
-      const msg = messagesDb.prepare('SELECT * FROM messages WHERE id = ?').get(messageId);
+      const msg = await getQuery('SELECT * FROM messages WHERE id = ?', [messageId]);
       if (!msg) return;
 
-      const existing = messagesDb.prepare(
-        'SELECT id FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?'
-      ).get(messageId, userId, emoji);
+      const existing = await getQuery(
+        'SELECT id FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?',
+        [messageId, userId, emoji]
+      );
 
       if (existing) {
-        messagesDb.prepare('DELETE FROM message_reactions WHERE id = ?').run(existing.id);
+        await runQuery('DELETE FROM message_reactions WHERE id = ?', [existing.id]);
       } else {
-        messagesDb.prepare('INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?)')
-          .run(messageId, userId, emoji);
+        await runQuery('INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?)',
+          [messageId, userId, emoji]);
       }
 
       const { getReactions } = require('./routes/messages');
-      const payload = { messageId, reactions: getReactions(messageId) };
+      const reactions = await getReactions(messageId);
+      const payload = { messageId, reactions };
 
       socket.emit('reaction_updated', payload);
       const otherUserId = msg.sender_id === userId ? msg.receiver_id : msg.sender_id;
