@@ -46,7 +46,7 @@ router.get('/:friendId', verifyToken, async (req, res) => {
        WHERE (m.sender_id = ? AND m.receiver_id = ?)
           OR (m.sender_id = ? AND m.receiver_id = ?)
        ORDER BY m.created_at ASC
-       LIMIT 50`,
+       LIMIT 500`,
       [userId, friendId, friendId, userId]
     );
 
