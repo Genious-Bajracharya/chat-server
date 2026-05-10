@@ -36,7 +36,8 @@ if (process.env.DATABASE_URL) {
       registration_country TEXT,
       device_info TEXT,
       last_login_at TIMESTAMP,
-      last_login_ip TEXT
+      last_login_ip TEXT,
+      team TEXT
     );
 
     CREATE TABLE IF NOT EXISTS friends (
@@ -132,7 +133,8 @@ if (process.env.DATABASE_URL) {
       registration_country TEXT,
       device_info TEXT,
       last_login_at DATETIME,
-      last_login_ip TEXT
+      last_login_ip TEXT,
+      team TEXT
     );
 
     CREATE TABLE IF NOT EXISTS friends (

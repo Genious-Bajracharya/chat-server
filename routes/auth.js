@@ -15,10 +15,14 @@ function getClientIP(req) {
 
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
-  const { username, email, password } = req.body;
+  const { username, email, password, team } = req.body;
 
   if (!username || !email || !password) {
     return res.status(400).json({ error: 'Username, email, and password are required.' });
+  }
+
+  if (!team || !['D', 'S'].includes(team)) {
+    return res.status(400).json({ error: 'Team must be either D or S.' });
   }
 
   if (username.length < 3 || username.length > 20) {
@@ -46,13 +50,13 @@ router.post('/register', async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 10);
     await runQuery(
-      `INSERT INTO users (username, email, password_hash, role, registration_ip, registration_country, device_info, last_login_at, last_login_ip)
-       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
-      [username, email, passwordHash, 'user', clientIP, country, deviceInfo, clientIP]
+      `INSERT INTO users (username, email, password_hash, role, registration_ip, registration_country, device_info, last_login_at, last_login_ip, team)
+       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)`,
+      [username, email, passwordHash, 'user', clientIP, country, deviceInfo, clientIP, team]
     );
 
     const user = await getQuery(
-      'SELECT id, username, email, role, created_at, registration_country, device_info FROM users WHERE email = ?',
+      'SELECT id, username, email, role, created_at, registration_country, device_info, team FROM users WHERE email = ?',
       [email]
     );
 
